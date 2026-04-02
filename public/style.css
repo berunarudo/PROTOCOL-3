@@ -221,9 +221,11 @@ button.small { padding: 6px 10px; font-size: 0.8rem; }
 .result-overlay {
   position: fixed;
   inset: 0;
-  z-index: 40;
+  z-index: 999;
   display: grid;
   place-items: center;
+  padding: 10px;
+  pointer-events: auto;
 }
 .result-backdrop {
   position: absolute;
@@ -232,7 +234,7 @@ button.small { padding: 6px 10px; font-size: 0.8rem; }
 }
 .result-card {
   position: relative;
-  width: min(620px, 92vw);
+  width: min(620px, 96vw);
   padding: 16px;
   text-align: center;
   animation: resultPop 0.24s ease;
@@ -332,6 +334,7 @@ button.small { padding: 6px 10px; font-size: 0.8rem; }
   .flow-buttons { justify-content: stretch; gap: 6px; }
   .flow-buttons button { flex: 1 1 calc(50% - 6px); min-height: 46px; }
   .result-actions { grid-template-columns: 1fr; }
-  .result-card { width: 94vw; padding: 14px; }
+  .result-overlay { padding: 8px; }
+  .result-card { width: 96vw; max-height: 84vh; padding: 14px; }
   .result-commands { grid-template-columns: 1fr; }
 }

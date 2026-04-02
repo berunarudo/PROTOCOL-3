@@ -1109,6 +1109,7 @@ function showResultOverlay(result) {
   ui.resultP2Commands.textContent = result.commands.p2.join(" -> ");
   ui.resultPanel.classList.remove("hidden");
   ui.resultPanel.setAttribute("aria-hidden", "false");
+  document.body.style.overflow = "hidden";
 
   if (state.mode === MODE.ONLINE) {
     ui.retryBtn.textContent = state.online.restartRequested ? "再戦要求送信済み" : "再戦を希望";
@@ -1152,6 +1153,7 @@ function hideResultOverlay() {
   ui.resultExtraStatus.textContent = "";
   ui.retryBtn.textContent = "もう一度";
   ui.retryBtn.disabled = false;
+  document.body.style.overflow = "";
 }
 
 function sleep(ms) {
