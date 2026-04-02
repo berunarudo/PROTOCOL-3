@@ -1,0 +1,222 @@
+﻿<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PROTOCOL-3 | 3手先戦略バトル</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="app-shell fade-in">
+    <header class="app-header">
+      <p class="tiny-caption">AUTONOMOUS TACTICAL WAR / YEAR 2486</p>
+      <h1>PROTOCOL-3</h1>
+      <p>先に入力した3手だけで勝敗が決まる、静かなAI戦争シミュレーション</p>
+    </header>
+
+    <main>
+      <section id="title-screen" class="panel title-panel">
+        <h2>MODE SELECT</h2>
+        <p class="title-lead">瞬間操作ではなく、3手の読みで勝つ戦術ゲーム。</p>
+
+        <div class="mode-card-grid">
+          <button id="cpu-mode-btn" class="mode-card primary" type="button">
+            <strong>CPU戦</strong>
+            <span>1人で練習する</span>
+          </button>
+          <button id="local-mode-btn" class="mode-card" type="button">
+            <strong>ローカル対戦</strong>
+            <span>1台で2人対戦</span>
+          </button>
+          <button id="online-mode-btn" class="mode-card" type="button">
+            <strong>オンライン対戦</strong>
+            <span>ルームIDで友達と対戦</span>
+          </button>
+        </div>
+
+        <div class="mode-buttons compact">
+          <button id="how-to-open-btn" class="secondary" type="button">遊び方</button>
+        </div>
+      </section>
+
+      <section id="game-screen" class="hidden fade-in">
+        <div class="mode-strip panel">
+          <span id="mode-badge" class="mode-badge">MODE: CPU戦</span>
+          <span id="turn-indicator" class="turn-indicator">入力フェーズ</span>
+        </div>
+
+        <div id="status-banner" class="status-banner info">モードを選択してください。</div>
+
+        <section id="online-room-panel" class="panel online-panel hidden">
+          <h3>ONLINE ROOM CONSOLE</h3>
+
+          <ol class="online-guide">
+            <li>名前を入力</li>
+            <li>ルーム作成 or ルームID入力で参加</li>
+            <li>2人そろったら3手を入力して命令送信</li>
+          </ol>
+
+          <div class="online-grid">
+            <label>
+              プレイヤー名
+              <input id="online-name-input" type="text" maxlength="20" placeholder="司令官名" autocomplete="off">
+            </label>
+            <label>
+              参加ルームID
+              <input id="online-room-input" type="text" maxlength="8" placeholder="例: A3F9K2" autocomplete="off">
+            </label>
+          </div>
+
+          <div class="mode-buttons left">
+            <button id="create-room-btn" class="primary" type="button">ルーム作成</button>
+            <button id="join-room-btn" class="secondary" type="button">ルーム参加</button>
+            <button id="leave-room-btn" class="secondary" type="button">ルーム退出</button>
+          </div>
+
+          <div class="online-room-id-box">
+            <span>現在のルームID</span>
+            <strong id="room-id-text">-</strong>
+            <button id="copy-room-btn" class="secondary small" type="button">コピー</button>
+          </div>
+
+          <div class="online-status-grid">
+            <p>接続状態: <strong id="connection-status">未接続</strong></p>
+            <p>相手状態: <strong id="opponent-state-text">未参加</strong></p>
+            <p>自分: <strong id="online-self-name">-</strong></p>
+            <p>相手: <strong id="online-opponent-name">-</strong></p>
+          </div>
+          <p id="online-message" class="online-message">オンライン対戦を開始するには名前を入力してください。</p>
+        </section>
+
+        <div class="status-row">
+          <article id="player-panel" class="panel commander-panel">
+            <div class="panel-head">
+              <h3 id="player-name">PLAYER</h3>
+              <span id="player-state-tag" class="state-tag">ONLINE</span>
+            </div>
+            <div class="hp-box">
+              <span>HP</span>
+              <strong id="player-hp-text">100</strong>
+            </div>
+            <div class="hp-bar"><div id="player-hp-fill" class="hp-fill"></div></div>
+            <p class="panel-note">Command Node : Human Operator</p>
+          </article>
+
+          <article class="panel center-panel">
+            <h2 id="phase-title">コマンド入力</h2>
+            <p id="phase-subtitle">3つの技を順番に選択してください。</p>
+            <p id="selection-step" class="selection-step">選択中: 1手目</p>
+            <p id="selected-sequence" class="selected-sequence">現在の並び: -</p>
+            <p id="confirmation-text" class="confirmation-text hidden">命令確定 / COMMAND LOCKED</p>
+
+            <div class="command-grid">
+              <div>
+                <h4 id="slot-p1-title">PLAYER COMMANDS</h4>
+                <div id="player-slots" class="slots"></div>
+              </div>
+              <div>
+                <h4 id="slot-p2-title">CPU COMMANDS</h4>
+                <div id="opponent-slots" class="slots"></div>
+              </div>
+            </div>
+
+            <div id="offline-flow-buttons" class="flow-buttons">
+              <button id="undo-btn" class="secondary" type="button">1手戻る</button>
+              <button id="clear-btn" class="secondary" type="button">全消し</button>
+              <button id="lock-btn" class="secondary" type="button">命令確定</button>
+              <button id="switch-player-btn" class="secondary hidden" type="button">プレイヤー交代へ</button>
+              <button id="start-battle-btn" class="primary" type="button" disabled>戦闘開始</button>
+            </div>
+
+            <div id="online-flow-buttons" class="flow-buttons hidden">
+              <button id="online-undo-btn" class="secondary" type="button">1手戻る</button>
+              <button id="online-clear-btn" class="secondary" type="button">全消し</button>
+              <button id="online-lock-btn" class="secondary" type="button">命令確定</button>
+              <button id="submit-online-btn" class="primary" type="button" disabled>命令送信</button>
+              <button id="online-restart-btn" class="secondary" type="button" disabled>再戦要求</button>
+            </div>
+          </article>
+
+          <article id="opponent-panel" class="panel commander-panel robot">
+            <div class="panel-head">
+              <h3 id="opponent-name">CPU UNIT</h3>
+              <span id="opponent-state-tag" class="state-tag enemy">AI CORE</span>
+            </div>
+            <div class="robot-face" aria-hidden="true">
+              <span class="eye"></span>
+              <span class="eye"></span>
+            </div>
+            <div class="hp-box">
+              <span>HP</span>
+              <strong id="opponent-hp-text">100</strong>
+            </div>
+            <div class="hp-bar"><div id="opponent-hp-fill" class="hp-fill enemy"></div></div>
+            <p class="panel-note">Command Node : Autonomous Machine</p>
+          </article>
+        </div>
+
+        <section class="panel commands-panel">
+          <h3>COMMAND LIBRARY</h3>
+          <div id="skill-buttons" class="skill-buttons"></div>
+        </section>
+
+        <section class="panel log-panel">
+          <h3>TACTICAL LOG</h3>
+          <div id="battle-log" class="battle-log"></div>
+        </section>
+
+        <section id="result-panel" class="result-overlay hidden" aria-hidden="true">
+          <div class="result-backdrop"></div>
+          <div id="result-card" class="panel result-card">
+            <h2 id="result-text">RESULT</h2>
+            <p id="result-detail"></p>
+            <p id="result-extra-status" class="result-extra-status"></p>
+            <div class="result-commands">
+              <div>
+                <h4 id="result-p1-title">PLAYER COMMANDS</h4>
+                <p id="result-p1-commands"></p>
+              </div>
+              <div>
+                <h4 id="result-p2-title">CPU COMMANDS</h4>
+                <p id="result-p2-commands"></p>
+              </div>
+            </div>
+            <div class="result-actions">
+              <button id="retry-btn" class="primary result-btn" type="button">もう一度</button>
+              <button id="back-title-btn" class="secondary result-btn" type="button">タイトルへ戻る</button>
+            </div>
+          </div>
+        </section>
+      </section>
+
+      <section id="handoff-screen" class="overlay hidden">
+        <div class="panel overlay-card">
+          <h2>端末をプレイヤー2へ渡してください</h2>
+          <p>相手に前の入力を見せないようにして、準備完了を押してください。</p>
+          <button id="handoff-ready-btn" class="primary" type="button">準備完了</button>
+        </div>
+      </section>
+
+      <section id="how-to-screen" class="overlay hidden">
+        <div class="panel overlay-card howto-card">
+          <h2>遊び方</h2>
+          <ul class="howto-list">
+            <li>お互いに最初に3手の命令を選択</li>
+            <li>1手目から3手目まで自動で同時実行</li>
+            <li>最終HPが多い側の勝利</li>
+            <li>CHARGE: 次の攻撃を強化</li>
+            <li>JAM: 相手の次の攻撃を弱体化</li>
+            <li>DRONE: 次ターン終了時に発動</li>
+            <li>相手の行動を読んで並びを作るのが重要</li>
+          </ul>
+          <button id="how-to-close-btn" class="primary" type="button">閉じる</button>
+        </div>
+      </section>
+
+      <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
+    </main>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>
