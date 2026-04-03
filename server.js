@@ -17,6 +17,8 @@ const MSG = {
   SUBMIT_COMMANDS: "submit_commands",
   RESTART_REQUEST: "restart_request",
   LEAVE_ROOM: "leave_room",
+  RANDOM_MATCH: "randomMatch",
+  CANCEL_RANDOM_MATCH: "cancelRandomMatch",
 
   ROOM_CREATED: "room_created",
   ROOM_JOINED: "room_joined",
@@ -28,6 +30,10 @@ const MSG = {
   ERROR: "error",
   OPPONENT_LEFT: "opponent_left",
   RESTART_WAITING: "restart_waiting",
+  RANDOM_MATCH_WAITING: "randomMatchWaiting",
+  MATCH_FOUND: "matchFound",
+  RANDOM_MATCH_CANCELED: "randomMatchCanceled",
+  MATCH_ERROR: "matchError",
 };
 
 const VALID_SKILLS = ["SHOT", "BURST", "GUARD", "CHARGE", "JAM", "REPAIR", "DRONE"];
@@ -38,6 +44,7 @@ const VALID_SKILLS = ["SHOT", "BURST", "GUARD", "CHARGE", "JAM", "REPAIR", "DRON
 
 const rooms = new Map();
 const playersBySocket = new Map();
+const waitingPlayers = [];
 let playerSequence = 1;
 
 // ========================================
@@ -87,6 +94,10 @@ function handleMessage(ws, raw) {
       return handleRestartRequest(ws);
     case MSG.LEAVE_ROOM:
       return handleLeaveRoom(ws, false);
+    case MSG.RANDOM_MATCH:
+      return handleRandomMatch(ws, payload);
+    case MSG.CANCEL_RANDOM_MATCH:
+      return handleCancelRandomMatch(ws);
     default:
       return sendError(ws, "未知のメッセージ種別です");
   }
@@ -97,6 +108,7 @@ function handleMessage(ws, raw) {
 // ========================================
 
 function handleCreateRoom(ws, payload) {
+  removeWaitingPlayer(ws);
   const playerName = sanitizeName(payload.playerName);
   if (!playerName) return sendError(ws, "名前を入力してください");
   if (playersBySocket.has(ws)) return sendError(ws, "既にルーム参加中です");
@@ -126,6 +138,7 @@ function handleCreateRoom(ws, payload) {
 }
 
 function handleJoinRoom(ws, payload) {
+  removeWaitingPlayer(ws);
   const playerName = sanitizeName(payload.playerName);
   const roomId = String(payload.roomId || "").toUpperCase();
 
@@ -234,7 +247,11 @@ function handleRestartRequest(ws) {
 
 function handleLeaveRoom(ws, disconnected) {
   const entry = playersBySocket.get(ws);
-  if (!entry) return;
+  if (!entry) {
+    const wasWaiting = removeWaitingPlayer(ws);
+    if (wasWaiting && !disconnected) send(ws, MSG.RANDOM_MATCH_CANCELED, {});
+    return;
+  }
 
   playersBySocket.delete(ws);
   const room = rooms.get(entry.roomId);
@@ -260,6 +277,82 @@ function handleLeaveRoom(ws, disconnected) {
 
   if (!disconnected) {
     send(ws, MSG.ROOM_JOINED, { left: true, roomId: null });
+  }
+}
+
+function handleRandomMatch(ws, payload) {
+  if (playersBySocket.has(ws)) {
+    sendMatchError(ws, "既にルーム参加中です");
+    return;
+  }
+
+  if (isWaitingPlayer(ws)) {
+    send(ws, MSG.RANDOM_MATCH_WAITING, { queueSize: waitingPlayers.length });
+    return;
+  }
+
+  const playerName = sanitizeName(payload.playerName);
+  if (!playerName) {
+    sendMatchError(ws, "名前を入力してください");
+    return;
+  }
+
+  waitingPlayers.push({ ws, playerName });
+  logInfo("RANDOM_QUEUE", `${playerName} joined queue size=${waitingPlayers.length}`);
+  send(ws, MSG.RANDOM_MATCH_WAITING, { queueSize: waitingPlayers.length });
+  tryMatchWaitingPlayers();
+}
+
+function handleCancelRandomMatch(ws) {
+  const removed = removeWaitingPlayer(ws);
+  if (!removed) {
+    sendMatchError(ws, "キャンセルできる待機状態ではありません");
+    return;
+  }
+  send(ws, MSG.RANDOM_MATCH_CANCELED, {});
+}
+
+function tryMatchWaitingPlayers() {
+  cleanupWaitingPlayers();
+
+  while (waitingPlayers.length >= 2) {
+    const first = waitingPlayers.shift();
+    const second = waitingPlayers.shift();
+    if (!first || !second) return;
+    if (first.ws === second.ws) continue;
+
+    const roomId = generateRoomId();
+    const p1 = createPlayer(first.ws, first.playerName);
+    const p2 = createPlayer(second.ws, second.playerName);
+
+    const room = {
+      roomId,
+      players: [p1, p2],
+      submitted: {},
+      restartRequests: new Set(),
+      status: "ready",
+      battleResult: null,
+    };
+
+    rooms.set(roomId, room);
+    playersBySocket.set(first.ws, { playerId: p1.id, roomId, playerName: p1.name });
+    playersBySocket.set(second.ws, { playerId: p2.id, roomId, playerName: p2.name });
+
+    send(first.ws, MSG.MATCH_FOUND, {
+      roomId,
+      playerId: p1.id,
+      playerName: p1.name,
+      opponentName: p2.name,
+    });
+
+    send(second.ws, MSG.MATCH_FOUND, {
+      roomId,
+      playerId: p2.id,
+      playerName: p2.name,
+      opponentName: p1.name,
+    });
+
+    logInfo("RANDOM_MATCH", `${roomId} ${p1.name} vs ${p2.name}`);
   }
 }
 
@@ -456,6 +549,26 @@ function getPlayerContext(ws) {
   return { ...entry, room };
 }
 
+function isWaitingPlayer(ws) {
+  return waitingPlayers.some((entry) => entry.ws === ws);
+}
+
+function removeWaitingPlayer(ws) {
+  const index = waitingPlayers.findIndex((entry) => entry.ws === ws);
+  if (index === -1) return false;
+  const removed = waitingPlayers.splice(index, 1)[0];
+  logInfo("RANDOM_CANCEL", `${removed.playerName} removed queue size=${waitingPlayers.length}`);
+  return true;
+}
+
+function cleanupWaitingPlayers() {
+  for (let i = waitingPlayers.length - 1; i >= 0; i -= 1) {
+    if (waitingPlayers[i].ws.readyState !== WebSocket.OPEN) {
+      waitingPlayers.splice(i, 1);
+    }
+  }
+}
+
 function sanitizeName(name) {
   const value = String(name || "").trim();
   if (!value) return "";
@@ -490,6 +603,11 @@ function broadcast(room, type, payload = {}) {
 function sendError(ws, message) {
   send(ws, MSG.ERROR, { message });
   logError("ERROR", message);
+}
+
+function sendMatchError(ws, message) {
+  send(ws, MSG.MATCH_ERROR, { message });
+  logError("MATCH_ERROR", message);
 }
 
 function logInfo(scope, message) {

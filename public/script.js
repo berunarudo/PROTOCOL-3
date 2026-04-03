@@ -40,6 +40,8 @@ const MESSAGE_TYPES = {
   SUBMIT_COMMANDS: "submit_commands",
   RESTART_REQUEST: "restart_request",
   LEAVE_ROOM: "leave_room",
+  RANDOM_MATCH: "randomMatch",
+  CANCEL_RANDOM_MATCH: "cancelRandomMatch",
 
   ROOM_CREATED: "room_created",
   ROOM_JOINED: "room_joined",
@@ -51,6 +53,10 @@ const MESSAGE_TYPES = {
   ERROR: "error",
   OPPONENT_LEFT: "opponent_left",
   RESTART_WAITING: "restart_waiting",
+  RANDOM_MATCH_WAITING: "randomMatchWaiting",
+  MATCH_FOUND: "matchFound",
+  RANDOM_MATCH_CANCELED: "randomMatchCanceled",
+  MATCH_ERROR: "matchError",
 };
 
 const NETWORK_CONFIG = {
@@ -140,6 +146,7 @@ const state = {
     restartRequested: false,
     opponentRestartRequested: false,
     isConnecting: false,
+    isRandomMatching: false,
   },
   battleAnimationRunning: false,
 };
@@ -219,8 +226,12 @@ const ui = {
   onlineRoomInput: document.getElementById("online-room-input"),
   createRoomBtn: document.getElementById("create-room-btn"),
   joinRoomBtn: document.getElementById("join-room-btn"),
+  randomMatchBtn: document.getElementById("random-match-btn"),
+  cancelRandomMatchBtn: document.getElementById("cancel-random-match-btn"),
   leaveRoomBtn: document.getElementById("leave-room-btn"),
   copyRoomBtn: document.getElementById("copy-room-btn"),
+  randomMatchWaitingBox: document.getElementById("random-match-waiting-box"),
+  randomMatchWaitingText: document.getElementById("random-match-waiting-text"),
   connectionStatus: document.getElementById("connection-status"),
   opponentStateText: document.getElementById("opponent-state-text"),
   roomIdText: document.getElementById("room-id-text"),
@@ -264,6 +275,8 @@ function bindEvents() {
 
   ui.createRoomBtn.addEventListener("click", onCreateRoom);
   ui.joinRoomBtn.addEventListener("click", onJoinRoom);
+  ui.randomMatchBtn.addEventListener("click", onStartRandomMatch);
+  ui.cancelRandomMatchBtn.addEventListener("click", onCancelRandomMatch);
   ui.leaveRoomBtn.addEventListener("click", leaveOnlineRoom);
   ui.copyRoomBtn.addEventListener("click", copyRoomId);
 
@@ -556,18 +569,30 @@ function updateOfflineInputUI() {
 }
 
 function onCreateRoom() {
-  if (state.mode !== MODE.ONLINE) return;
+  if (state.mode !== MODE.ONLINE || state.online.isRandomMatching) return;
   const playerName = ui.onlineNameInput.value.trim();
   if (!playerName) return showToast("名前を入力してください", "error");
   ensureOnlineSocket(() => sendToServer(MESSAGE_TYPES.CREATE_ROOM, { playerName }));
 }
 
 function onJoinRoom() {
-  if (state.mode !== MODE.ONLINE) return;
+  if (state.mode !== MODE.ONLINE || state.online.isRandomMatching) return;
   const playerName = ui.onlineNameInput.value.trim();
   const roomId = ui.onlineRoomInput.value.trim().toUpperCase();
   if (!playerName || !roomId) return showToast("名前とルームIDを入力してください", "error");
   ensureOnlineSocket(() => sendToServer(MESSAGE_TYPES.JOIN_ROOM, { playerName, roomId }));
+}
+
+function onStartRandomMatch() {
+  if (state.mode !== MODE.ONLINE || state.online.isRandomMatching || state.online.roomId) return;
+  const playerName = ui.onlineNameInput.value.trim();
+  if (!playerName) return showToast("名前を入力してください", "error");
+  ensureOnlineSocket(() => sendToServer(MESSAGE_TYPES.RANDOM_MATCH, { playerName }));
+}
+
+function onCancelRandomMatch() {
+  if (state.mode !== MODE.ONLINE || !state.online.isRandomMatching) return;
+  sendToServer(MESSAGE_TYPES.CANCEL_RANDOM_MATCH);
 }
 
 function getWebSocketUrl() {
@@ -660,6 +685,7 @@ function handleServerMessage(raw) {
       state.online.playerName = payload.playerName;
       state.online.roomId = payload.roomId;
       state.online.opponentName = "-";
+      state.online.isRandomMatching = false;
       setPhase(PHASE.ONLINE_WAITING);
       setOnlineMessage(`ルーム作成完了。ID: ${payload.roomId} を相手に共有してください。`);
       setStatusBanner("ルーム作成完了: 相手の参加待ち", "warn");
@@ -672,6 +698,7 @@ function handleServerMessage(raw) {
       if (payload.left) {
         setOnlineMessage("ルームから退出しました。");
         setStatusBanner("ルーム退出完了", "info");
+        state.online.isRandomMatching = false;
         updateOnlineRoomActionButtons();
         break;
       }
@@ -679,6 +706,7 @@ function handleServerMessage(raw) {
       state.online.playerName = payload.playerName;
       state.online.roomId = payload.roomId;
       state.online.opponentName = payload.opponentName || "-";
+      state.online.isRandomMatching = false;
       setPhase(payload.ready ? PHASE.INPUT : PHASE.ONLINE_WAITING);
       resetOnlineInputState();
       setOnlineMessage(payload.ready ? "対戦準備完了。3手を入力してください。" : "ルーム参加完了。相手待ちです。");
@@ -698,6 +726,7 @@ function handleServerMessage(raw) {
     case MESSAGE_TYPES.READY_TO_BATTLE:
       setPhase(PHASE.INPUT);
       state.battleAnimationRunning = false;
+      state.online.isRandomMatching = false;
       resetOnlineInputState();
       clearLog();
       updateHpDisplay(GAME_CONFIG.maxHp, GAME_CONFIG.maxHp);
@@ -750,6 +779,7 @@ function handleServerMessage(raw) {
       state.online.opponentName = "-";
       setPhase(PHASE.ONLINE_WAITING);
       state.battleAnimationRunning = false;
+      state.online.isRandomMatching = false;
       resetOnlineInputState();
       setOnlineMessage("相手が切断しました。新しい相手の参加を待っています。");
       setStatusBanner("相手が切断しました", "error");
@@ -763,6 +793,57 @@ function handleServerMessage(raw) {
       setOnlineMessage(`エラー: ${payload.message}`);
       setStatusBanner(`エラー: ${payload.message}`, "error");
       showToast(payload.message, "error");
+      break;
+
+    case MESSAGE_TYPES.RANDOM_MATCH_WAITING:
+      state.online.isRandomMatching = true;
+      setPhase(PHASE.ONLINE_WAITING);
+      setOnlineMessage("対戦相手を探しています。マッチ成立までお待ちください。");
+      setStatusBanner("ランダムマッチ待機中", "warn");
+      if (typeof payload.queueSize === "number" && payload.queueSize > 1) {
+        ui.randomMatchWaitingText.textContent = `対戦相手を探しています...（待機人数: ${payload.queueSize}）`;
+      } else {
+        ui.randomMatchWaitingText.textContent = "対戦相手を探しています...";
+      }
+      updateOnlineInputUI();
+      updateOnlineRoomActionButtons();
+      break;
+
+    case MESSAGE_TYPES.MATCH_FOUND:
+      state.online.playerId = payload.playerId;
+      state.online.playerName = payload.playerName;
+      state.online.roomId = payload.roomId;
+      state.online.opponentName = payload.opponentName || "-";
+      state.online.isRandomMatching = false;
+      state.battleAnimationRunning = false;
+      setPhase(PHASE.INPUT);
+      resetOnlineInputState();
+      clearLog();
+      updateHpDisplay(GAME_CONFIG.maxHp, GAME_CONFIG.maxHp);
+      setOnlineMessage(`マッチ成立: ${payload.opponentName} と対戦開始。3手を入力してください。`);
+      setStatusBanner("ランダムマッチ成立", "ok");
+      showToast("マッチ成立", "ok");
+      updateOnlineStatusPanel();
+      updateOnlineInputUI();
+      updateOnlineRoomActionButtons();
+      break;
+
+    case MESSAGE_TYPES.RANDOM_MATCH_CANCELED:
+      state.online.isRandomMatching = false;
+      setPhase(PHASE.ONLINE_LOBBY);
+      setOnlineMessage("ランダムマッチ待機をキャンセルしました。");
+      setStatusBanner("待機キャンセル", "info");
+      updateOnlineInputUI();
+      updateOnlineRoomActionButtons();
+      break;
+
+    case MESSAGE_TYPES.MATCH_ERROR:
+      state.online.isRandomMatching = false;
+      setOnlineMessage(`エラー: ${payload.message}`);
+      setStatusBanner(`エラー: ${payload.message}`, "error");
+      showToast(payload.message, "error");
+      updateOnlineInputUI();
+      updateOnlineRoomActionButtons();
       break;
 
     default:
@@ -788,6 +869,7 @@ function resetOnlineInputState() {
 function resetOnlineSessionState(keepIdentity = false) {
   state.online.connected = false;
   state.online.isConnecting = false;
+  state.online.isRandomMatching = false;
   if (!keepIdentity) {
     state.online.playerId = null;
     state.online.playerName = "";
@@ -803,11 +885,15 @@ function resetOnlineSessionState(keepIdentity = false) {
 
 function updateOnlineRoomActionButtons() {
   const hasRoom = Boolean(state.online.roomId);
-  const canCreateOrJoin = !hasRoom && !state.online.isConnecting;
+  const isBusy = hasRoom || state.online.isConnecting || state.online.isRandomMatching;
+  const canCreateOrJoin = !isBusy;
   ui.createRoomBtn.disabled = !canCreateOrJoin;
   ui.joinRoomBtn.disabled = !canCreateOrJoin;
+  ui.randomMatchBtn.disabled = !canCreateOrJoin;
+  ui.cancelRandomMatchBtn.disabled = !state.online.isRandomMatching;
   ui.leaveRoomBtn.disabled = !hasRoom;
   ui.copyRoomBtn.disabled = !hasRoom;
+  ui.randomMatchWaitingBox.classList.toggle("hidden", !state.online.isRandomMatching);
 }
 
 function undoOnlineCommand() {
@@ -866,6 +952,7 @@ function leaveOnlineRoom() {
   setPhase(PHASE.ONLINE_LOBBY);
   state.online.roomId = "";
   state.online.opponentName = "";
+  state.online.isRandomMatching = false;
   resetOnlineInputState();
   hideResultOverlay();
   setStatusBanner("ルーム退出完了", "info");
