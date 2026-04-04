@@ -11,6 +11,7 @@
     <header class="app-header">
       <p class="tiny-caption">AUTONOMOUS TACTICAL WAR / YEAR 2486</p>
       <h1>PROTOCOL-3</h1>
+      <p class="version-tag">Ver.1.10</p>
       <p>先に入力した3手だけで勝敗が決まる、静かなAI戦争シミュレーション</p>
     </header>
 
@@ -37,6 +38,26 @@
         <div class="mode-buttons compact">
           <button id="how-to-open-btn" class="secondary" type="button">遊び方</button>
         </div>
+
+        <section class="notice-panel" aria-label="お知らせ">
+          <h3>お知らせ</h3>
+          <div class="notice-body">
+            <ul>
+              <li>Ver.1.10 公開</li>
+              <li>バトルバランス調整を実施</li>
+              <li>同じコマンドは2回まで選択可能に変更</li>
+              <li>SHOT: 25ダメージ</li>
+              <li>BURST: 38ダメージ、使用後は次ターン被ダメージ増加</li>
+              <li>GUARD: そのターンの直接攻撃のみ無効、使用後は次ターン被ダメージ増加</li>
+              <li>CHARGE: 次の攻撃1回を1.3倍、重ね掛け可能、上限1.6倍</li>
+              <li>JAM: 相手の次の攻撃を0.7倍</li>
+              <li>REPAIR: 15回復＋次ターン被ダメージ軽減</li>
+              <li>DRONE: 次ターン終了時に10ダメージ＋自分3回復</li>
+              <li>GUARDではDRONEを防げない</li>
+              <li>各種仕様を調整中</li>
+            </ul>
+          </div>
+        </section>
       </section>
 
       <section id="game-screen" class="hidden fade-in">

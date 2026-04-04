@@ -6,11 +6,27 @@
 const GAME_CONFIG = {
   maxHp: 100,
   commandCount: 3,
+  maxDuplicatePerCommand: 2,
   timings: {
     intro: 700,
     turnDelay: 880,
     lineDelay: 90,
   },
+};
+
+const BATTLE_RULES = {
+  MAX_HP: 100,
+  SHOT_DAMAGE: 25,
+  BURST_DAMAGE: 38,
+  DRONE_DAMAGE: 10,
+  DRONE_HEAL: 3,
+  REPAIR_HEAL: 15,
+  CHARGE_MULTIPLIER: 1.3,
+  CHARGE_CAP: 1.6,
+  JAM_MULTIPLIER: 0.7,
+  BURST_RECOIL_TAKEN_MULTIPLIER: 1.25,
+  GUARD_RECOIL_TAKEN_MULTIPLIER: 1.25,
+  REPAIR_TAKEN_MULTIPLIER: 0.85,
 };
 
 const MODE = {
@@ -67,30 +83,30 @@ const SKILLS = {
   SHOT: {
     id: "SHOT",
     name: "SHOT",
-    description: "通常攻撃 / 20ダメージ",
+    description: "通常攻撃 / 25ダメージ",
     role: "攻撃",
     roleClass: "attack",
-    power: 20,
+    power: 25,
   },
   BURST: {
     id: "BURST",
     name: "BURST",
-    description: "強攻撃 / 35ダメージ",
+    description: "強攻撃 / 38ダメージ(反動あり)",
     role: "攻撃",
     roleClass: "attack",
-    power: 35,
+    power: 38,
   },
   GUARD: {
     id: "GUARD",
     name: "GUARD",
-    description: "そのターン被ダメージ半減",
+    description: "直接攻撃を無効化(反動あり)",
     role: "防御",
     roleClass: "defense",
   },
   CHARGE: {
     id: "CHARGE",
     name: "CHARGE",
-    description: "次の攻撃を1.5倍",
+    description: "次攻撃を強化(上限1.6倍)",
     role: "補助",
     roleClass: "support",
   },
@@ -105,7 +121,7 @@ const SKILLS = {
   REPAIR: {
     id: "REPAIR",
     name: "REPAIR",
-    description: "HPを18回復",
+    description: "HPを15回復+次ターン軽減",
     role: "回復",
     roleClass: "heal",
     heal: 18,
@@ -113,7 +129,7 @@ const SKILLS = {
   DRONE: {
     id: "DRONE",
     name: "DRONE",
-    description: "次ターン終了時に15ダメージ",
+    description: "次ターン10ダメージ/自分3回復",
     role: "設置",
     roleClass: "setup",
     delayedDamage: 15,
@@ -393,10 +409,30 @@ function setCurrentOfflineLocked(locked) {
   if (state.inputSide === "p1") state.locks.p1 = locked;
   else state.locks.p2 = locked;
 }
+
+function countCommand(commands, skillId) {
+  return commands.filter((command) => command === skillId).length;
+}
+
+function canSelectCommand(commands, skillId) {
+  return countCommand(commands, skillId) < GAME_CONFIG.maxDuplicatePerCommand;
+}
+
+function isValidCommandSet(commands) {
+  if (!Array.isArray(commands) || commands.length !== GAME_CONFIG.commandCount) return false;
+  return commands.every(
+    (command) => SKILLS[command] && countCommand(commands, command) <= GAME_CONFIG.maxDuplicatePerCommand,
+  );
+}
+
 function selectSkill(skillId) {
   if (state.mode === MODE.ONLINE) {
     if (state.phase !== PHASE.INPUT || state.online.commandLocked || state.online.mySubmitted) return;
     if (state.p1Commands.length >= GAME_CONFIG.commandCount) return;
+    if (!canSelectCommand(state.p1Commands, skillId)) {
+      showToast("同じコマンドは2回までです", "error");
+      return;
+    }
     state.p1Commands.push(skillId);
     updateOnlineInputUI();
     return;
@@ -405,6 +441,10 @@ function selectSkill(skillId) {
   if (state.phase !== PHASE.INPUT || state.awaitingHandoff || isCurrentOfflineLocked()) return;
   const list = getCurrentOfflineCommands();
   if (list.length >= GAME_CONFIG.commandCount) return;
+  if (!canSelectCommand(list, skillId)) {
+    showToast("同じコマンドは2回までです", "error");
+    return;
+  }
   list.push(skillId);
   updateOfflineInputUI();
 }
@@ -429,6 +469,10 @@ function lockOfflineCommands() {
   const list = getCurrentOfflineCommands();
   if (list.length !== GAME_CONFIG.commandCount) {
     showToast("3手すべて選択してください", "error");
+    return;
+  }
+  if (!isValidCommandSet(list)) {
+    showToast("同じコマンドは2回までです", "error");
     return;
   }
 
@@ -473,6 +517,10 @@ function beginPlayer2Input() {
 
 async function startOfflineBattle() {
   if (state.mode === MODE.ONLINE || !canStartOfflineBattle() || state.battleAnimationRunning) return;
+  if (!isValidCommandSet(state.p1Commands) || !isValidCommandSet(state.p2Commands)) {
+    showToast("コマンド構成が不正です。3重選択を確認してください。", "error");
+    return;
+  }
 
   state.battleAnimationRunning = true;
   setPhase(PHASE.BATTLE);
@@ -915,6 +963,10 @@ function lockOnlineCommands() {
     showToast("3手すべて選択してください", "error");
     return;
   }
+  if (!isValidCommandSet(state.p1Commands)) {
+    showToast("同じコマンドは2回までです", "error");
+    return;
+  }
   state.online.commandLocked = true;
   setStatusBanner("命令確定: 送信できます", "ok");
   setOnlineMessage("命令を確定しました。送信ボタンでサーバーへ提出してください。");
@@ -923,6 +975,10 @@ function lockOnlineCommands() {
 
 function submitOnlineCommands() {
   if (state.mode !== MODE.ONLINE || state.phase !== PHASE.INPUT) return;
+  if (!isValidCommandSet(state.p1Commands)) {
+    showToast("同じコマンドは2回までです", "error");
+    return;
+  }
   if (!state.online.commandLocked) {
     showToast("先に命令確定してください", "error");
     return;
@@ -1249,8 +1305,8 @@ function sleep(ms) {
 
 function simulateBattle(player1Commands, player2Commands, meta = { p1Name: "P1", p2Name: "P2" }) {
   const battleState = {
-    p1: { hp: 100, chargeReady: false, jamMultiplier: 1, droneReady: false },
-    p2: { hp: 100, chargeReady: false, jamMultiplier: 1, droneReady: false },
+    p1: { hp: BATTLE_RULES.MAX_HP, chargeMultiplier: 1, jamMultiplier: 1, droneReady: false, nextTakenMultiplier: 1 },
+    p2: { hp: BATTLE_RULES.MAX_HP, chargeMultiplier: 1, jamMultiplier: 1, droneReady: false, nextTakenMultiplier: 1 },
   };
 
   const turns = [];
@@ -1267,13 +1323,30 @@ function simulateBattle(player1Commands, player2Commands, meta = { p1Name: "P1",
     const p1ScheduleDrone = action1 === "DRONE";
     const p2ScheduleDrone = action2 === "DRONE";
 
+    const p1TakenMultiplier = battleState.p1.nextTakenMultiplier;
+    const p2TakenMultiplier = battleState.p2.nextTakenMultiplier;
+    battleState.p1.nextTakenMultiplier = 1;
+    battleState.p2.nextTakenMultiplier = 1;
+
     if (action1 === "CHARGE") {
-      battleState.p1.chargeReady = true;
-      events.push({ category: "setup", message: `${meta.p1Name} がCHARGE。次の攻撃が強化。` });
+      battleState.p1.chargeMultiplier = Math.min(
+        BATTLE_RULES.CHARGE_CAP,
+        battleState.p1.chargeMultiplier * BATTLE_RULES.CHARGE_MULTIPLIER,
+      );
+      events.push({
+        category: "setup",
+        message: `${meta.p1Name} がCHARGE。次の攻撃倍率 ${battleState.p1.chargeMultiplier.toFixed(2)}x`,
+      });
     }
     if (action2 === "CHARGE") {
-      battleState.p2.chargeReady = true;
-      events.push({ category: "setup", message: `${meta.p2Name} がCHARGE。次の攻撃が強化。` });
+      battleState.p2.chargeMultiplier = Math.min(
+        BATTLE_RULES.CHARGE_CAP,
+        battleState.p2.chargeMultiplier * BATTLE_RULES.CHARGE_MULTIPLIER,
+      );
+      events.push({
+        category: "setup",
+        message: `${meta.p2Name} がCHARGE。次の攻撃倍率 ${battleState.p2.chargeMultiplier.toFixed(2)}x`,
+      });
     }
 
     const p1Jam = action1 === "JAM";
@@ -1284,32 +1357,74 @@ function simulateBattle(player1Commands, player2Commands, meta = { p1Name: "P1",
     if (p1ScheduleDrone) events.push({ category: "setup", message: `${meta.p1Name} がDRONEを設置。` });
     if (p2ScheduleDrone) events.push({ category: "setup", message: `${meta.p2Name} がDRONEを設置。` });
 
-    const damageToP2 = calculateAttackDamage(action1, battleState.p1, p2Guarding);
-    const damageToP1 = calculateAttackDamage(action2, battleState.p2, p1Guarding);
+    let directToP2 = calculateAttackDamage(action1, battleState.p1);
+    let directToP1 = calculateAttackDamage(action2, battleState.p2);
+
+    if (p2Guarding && directToP2 > 0) {
+      events.push({ category: "defense", message: `${meta.p2Name} のGUARDが直接攻撃を無効化` });
+      directToP2 = 0;
+    }
+    if (p1Guarding && directToP1 > 0) {
+      events.push({ category: "defense", message: `${meta.p1Name} のGUARDが直接攻撃を無効化` });
+      directToP1 = 0;
+    }
+
+    const damageToP2 = Math.round(directToP2 * p2TakenMultiplier);
+    const damageToP1 = Math.round(directToP1 * p1TakenMultiplier);
 
     if (damageToP2 > 0) events.push({ category: "attack", message: `${meta.p1Name} の攻撃: ${meta.p2Name} に ${damageToP2} ダメージ` });
     if (damageToP1 > 0) events.push({ category: "attack", message: `${meta.p2Name} の攻撃: ${meta.p1Name} に ${damageToP1} ダメージ` });
     if (p1Guarding) events.push({ category: "defense", message: `${meta.p1Name} はGUARD態勢` });
     if (p2Guarding) events.push({ category: "defense", message: `${meta.p2Name} はGUARD態勢` });
 
-    if (p1Jam) battleState.p2.jamMultiplier *= 0.7;
-    if (p2Jam) battleState.p1.jamMultiplier *= 0.7;
+    if (p1Jam) battleState.p2.jamMultiplier *= BATTLE_RULES.JAM_MULTIPLIER;
+    if (p2Jam) battleState.p1.jamMultiplier *= BATTLE_RULES.JAM_MULTIPLIER;
 
-    const heal1 = action1 === "REPAIR" ? 18 : 0;
-    const heal2 = action2 === "REPAIR" ? 18 : 0;
-    if (heal1 > 0) events.push({ category: "heal", message: `${meta.p1Name} がREPAIRで 18 回復` });
-    if (heal2 > 0) events.push({ category: "heal", message: `${meta.p2Name} がREPAIRで 18 回復` });
+    const heal1 = action1 === "REPAIR" ? BATTLE_RULES.REPAIR_HEAL : 0;
+    const heal2 = action2 === "REPAIR" ? BATTLE_RULES.REPAIR_HEAL : 0;
+    if (heal1 > 0) events.push({ category: "heal", message: `${meta.p1Name} がREPAIRで ${BATTLE_RULES.REPAIR_HEAL} 回復` });
+    if (heal2 > 0) events.push({ category: "heal", message: `${meta.p2Name} がREPAIRで ${BATTLE_RULES.REPAIR_HEAL} 回復` });
 
-    const droneToP2 = battleState.p1.droneReady ? 15 : 0;
-    const droneToP1 = battleState.p2.droneReady ? 15 : 0;
-    if (droneToP2 > 0) events.push({ category: "setup", message: `${meta.p1Name} のDRONE起動: ${meta.p2Name} に 15 ダメージ` });
-    if (droneToP1 > 0) events.push({ category: "setup", message: `${meta.p2Name} のDRONE起動: ${meta.p1Name} に 15 ダメージ` });
+    const droneToP2 = battleState.p1.droneReady ? Math.round(BATTLE_RULES.DRONE_DAMAGE * p2TakenMultiplier) : 0;
+    const droneToP1 = battleState.p2.droneReady ? Math.round(BATTLE_RULES.DRONE_DAMAGE * p1TakenMultiplier) : 0;
+    if (droneToP2 > 0) events.push({ category: "setup", message: `${meta.p1Name} のDRONE起動: ${meta.p2Name} に ${droneToP2} ダメージ (GUARD貫通)` });
+    if (droneToP1 > 0) events.push({ category: "setup", message: `${meta.p2Name} のDRONE起動: ${meta.p1Name} に ${droneToP1} ダメージ (GUARD貫通)` });
 
-    battleState.p1.hp = clampHp(battleState.p1.hp - damageToP1 - droneToP1 + heal1);
-    battleState.p2.hp = clampHp(battleState.p2.hp - damageToP2 - droneToP2 + heal2);
+    const droneHeal1 = p1ScheduleDrone ? BATTLE_RULES.DRONE_HEAL : 0;
+    const droneHeal2 = p2ScheduleDrone ? BATTLE_RULES.DRONE_HEAL : 0;
+    if (droneHeal1 > 0) events.push({ category: "heal", message: `${meta.p1Name} はDRONE制御で ${BATTLE_RULES.DRONE_HEAL} 回復` });
+    if (droneHeal2 > 0) events.push({ category: "heal", message: `${meta.p2Name} はDRONE制御で ${BATTLE_RULES.DRONE_HEAL} 回復` });
+
+    battleState.p1.hp = clampHp(battleState.p1.hp - damageToP1 - droneToP1 + heal1 + droneHeal1);
+    battleState.p2.hp = clampHp(battleState.p2.hp - damageToP2 - droneToP2 + heal2 + droneHeal2);
 
     battleState.p1.droneReady = p1ScheduleDrone;
     battleState.p2.droneReady = p2ScheduleDrone;
+
+    if (action1 === "BURST") {
+      battleState.p1.nextTakenMultiplier *= BATTLE_RULES.BURST_RECOIL_TAKEN_MULTIPLIER;
+      events.push({ category: "system", message: `${meta.p1Name} はBURST反動で次ターン被ダメ増加` });
+    }
+    if (action2 === "BURST") {
+      battleState.p2.nextTakenMultiplier *= BATTLE_RULES.BURST_RECOIL_TAKEN_MULTIPLIER;
+      events.push({ category: "system", message: `${meta.p2Name} はBURST反動で次ターン被ダメ増加` });
+    }
+    if (action1 === "GUARD") {
+      battleState.p1.nextTakenMultiplier *= BATTLE_RULES.GUARD_RECOIL_TAKEN_MULTIPLIER;
+      events.push({ category: "system", message: `${meta.p1Name} はGUARD反動で次ターン被ダメ増加` });
+    }
+    if (action2 === "GUARD") {
+      battleState.p2.nextTakenMultiplier *= BATTLE_RULES.GUARD_RECOIL_TAKEN_MULTIPLIER;
+      events.push({ category: "system", message: `${meta.p2Name} はGUARD反動で次ターン被ダメ増加` });
+    }
+    if (action1 === "REPAIR") {
+      battleState.p1.nextTakenMultiplier *= BATTLE_RULES.REPAIR_TAKEN_MULTIPLIER;
+      events.push({ category: "system", message: `${meta.p1Name} はREPAIR効果で次ターン被ダメ軽減` });
+    }
+    if (action2 === "REPAIR") {
+      battleState.p2.nextTakenMultiplier *= BATTLE_RULES.REPAIR_TAKEN_MULTIPLIER;
+      events.push({ category: "system", message: `${meta.p2Name} はREPAIR効果で次ターン被ダメ軽減` });
+    }
 
     turns.push({
       turn: i + 1,
@@ -1337,18 +1452,15 @@ function simulateBattle(player1Commands, player2Commands, meta = { p1Name: "P1",
   };
 }
 
-function calculateAttackDamage(actionId, attacker, targetGuarding) {
+function calculateAttackDamage(actionId, attacker) {
   if (actionId !== "SHOT" && actionId !== "BURST") return 0;
-  let damage = actionId === "SHOT" ? 20 : 35;
-  if (attacker.chargeReady) {
-    damage *= 1.5;
-    attacker.chargeReady = false;
-  }
+  let damage = actionId === "SHOT" ? BATTLE_RULES.SHOT_DAMAGE : BATTLE_RULES.BURST_DAMAGE;
+  damage *= attacker.chargeMultiplier;
+  attacker.chargeMultiplier = 1;
   if (attacker.jamMultiplier !== 1) {
     damage *= attacker.jamMultiplier;
     attacker.jamMultiplier = 1;
   }
-  if (targetGuarding) damage *= 0.5;
   return Math.max(0, Math.round(damage));
 }
 
@@ -1359,7 +1471,7 @@ function decideWinner(p1, p2) {
 }
 
 function clampHp(v) {
-  return Math.max(0, Math.min(100, v));
+  return Math.max(0, Math.min(BATTLE_RULES.MAX_HP, v));
 }
 
 function generateCpuCommands(playerCommands) {
@@ -1377,7 +1489,7 @@ function generateCpuCommands(playerCommands) {
 
     if (estimatedHp <= 58 && Math.random() < 0.52 && !isTripleRisk(picks, "REPAIR")) {
       picks.push("REPAIR");
-      estimatedHp = Math.min(100, estimatedHp + 18);
+      estimatedHp = Math.min(100, estimatedHp + BATTLE_RULES.REPAIR_HEAL);
       continue;
     }
 
